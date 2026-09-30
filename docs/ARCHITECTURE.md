@@ -1,84 +1,104 @@
 # PhoneKey Architecture
 
-> **Historical design proposal, not the current implementation.** The custom
-> LSA authentication package, SQLite store, and passwordless account path
-> described below have not been built. The current pilot uses the Rust
-> LocalSystem service, native Credential Provider, Android BLE GATT server,
-> protected JSON state, and an opt-in encrypted Windows-password vault after
-> phone proof. See [CURRENT_STATE.md](CURRENT_STATE.md) and
-> [PUBLIC-WINDOWS-SIGNIN.md](PUBLIC-WINDOWS-SIGNIN.md) before using this design.
+PhoneKey is a local phone-approved Windows authentication system. The current implementation separates discovery/transport, user approval, privileged authentication state, and Windows credential submission so that no single UI component becomes the security authority.
 
-## Scope
-
-PhoneKey is a local authentication path spanning a generic Windows PC companion application, the Windows secure desktop, a Windows broker service, and a generic Android phone companion application. The two companion applications pair during enrollment; the pairing is represented by cryptographic installation identities, not by a laptop model, Android vendor, hostname, or Bluetooth address. The architecture deliberately separates presentation, orchestration, and authorization so that the Credential Provider is not treated as the security authority.
-
-## Component boundaries
-
-| Boundary | Component | Trust and responsibility |
-|---|---|---|
-| Secure desktop UI | V2 Windows Credential Provider | Renders the PhoneKey tile and QR bitmap, receives user interaction, requests session data, and serializes the returned proof. It does not decide authorization. |
-| Authentication authority | Custom LSA authentication package | Parses the credential blob defensively, checks session and account binding, verifies the signature, atomically consumes the session, and returns the authentication result. |
-| Local orchestration | Rust Windows broker service | Owns the GATT server, creates and expires sessions, coordinates phone messages, accesses the trust store, verifies protocol messages, and logs non-secret events. |
-| Phone trust device | Android PhoneKey app | Scans QR sessions, displays the laptop identity, performs user authentication through Android APIs, signs the canonical transcript, and communicates over BLE. |
-| Local administration | PhoneKey admin application | Performs privileged enable/disable, phone enrollment, revocation, diagnostics, and recovery actions. Management operations are separate from login-session operations. |
-| Persistent state | SQLite and protected local configuration | Stores trusted-device metadata, bounded session state, settings, and audit events. It must not store Windows passwords, biometric data, or unnecessary signatures. |
-
-## Normal authentication flow
+## Current implementation
 
 ```text
-Windows LogonUI
-    |
-    | V2 Credential Provider requests a session
-    v
-Rust broker service
-    |-- creates session_id, nonce_laptop, timestamps, and QR payload
-    |-- advertises PhoneKey GATT service while enabled and healthy
-    v
-Windows Credential Provider displays QR
-    |
-    | phone scans QR and explicitly approves laptop identity
-    v
-Android PhoneKey app
-    |-- connects as BLE GATT client
-    |-- receives session details and nonce_phone challenge
-    |-- invokes BiometricPrompt / device credential
-    |-- signs canonical transcript using Android Keystore key
-    v
-Rust broker service
-    |-- validates message, trust status, freshness, and session state
-    |-- forwards compact proof to the authentication pipeline
-    v
-Custom LSA authentication package
-    |-- validates credential blob and exact transcript
-    |-- verifies ECDSA signature
-    |-- binds trusted phone to explicit Windows SID
-    |-- consumes session atomically
-    v
-Windows authorizes the bound local account
+Android companion
+  │
+  │ BLE advertisement + GATT
+  │ signed challenge/proof
+  ▼
+PhoneKey Windows service
+(Rust, LocalSystem)
+  │
+  │ restricted named-pipe IPC
+  ▼
+Native Windows Credential Provider
+  │
+  ▼
+Windows LogonUI / Windows authentication stack
 ```
 
-## IPC and service security
+The Android application currently acts as the BLE GATT peripheral/server for the Windows sign-in path. The Windows service discovers the PhoneKey service, connects, delivers a fresh login challenge, and reads the signed proof after local phone authentication.
 
-The broker runs as a Windows Service because PhoneKey must operate before interactive user logon. The Credential Provider and admin application communicate through constrained named-pipe interfaces with restrictive ACLs. The login-session interface must not expose trust-store mutation. Management methods are restricted to SYSTEM, the Credential Provider trust boundary where necessary, and administrators.
+## Security boundaries
 
-All requests from the phone are hostile until validated. The broker must enforce message-size, time, version, and state bounds. It must never execute arbitrary code supplied by the phone. A broker crash, service stop, or malformed request must result in an unavailable PhoneKey path rather than a stale authorization opportunity.
+| Boundary | Component | Responsibility |
+|---|---|---|
+| Phone local trust | Android companion | Holds the phone signing identity, validates QR/challenge binding, requires local authentication, signs the canonical proof |
+| Untrusted transport | BLE | Discovery and message transport only; Bluetooth metadata is never authentication identity |
+| Privileged authority | Rust Windows service | Owns enrollment, trusted-phone state, login sessions, BLE orchestration, account binding, proof verification and one-use authorization |
+| Secure desktop integration | Native Credential Provider | Displays PhoneKey status/QR, communicates with the service, and hands the permitted credential form to Windows |
+| Final OS decision | Windows authentication stack | Makes the final Windows logon decision |
+| Recovery | Native Windows providers | PIN/password/Windows Hello remain available during development and testing |
 
-## Persistent data ownership
+## Login flow
 
-The broker owns session lifecycle and the local trust store. The Credential Provider should request only the information required to display and submit the current session. The LSA package should not become a general database client; its input must be a compact, bounded, package-specific credential blob and its validation path must be conservative.
+1. Windows LogonUI selects the PhoneKey Credential Provider.
+2. The provider asks the privileged service to create a bounded login transaction.
+3. The service creates the fresh session/challenge and exposes the QR/bootstrap material.
+4. The phone scans the QR and starts/refreshes PhoneKey BLE advertising.
+5. Windows discovers the PhoneKey BLE service and connects.
+6. Windows delivers the exact fresh login challenge over GATT.
+7. The Android app verifies that the BLE challenge matches the scanned QR/session.
+8. Android waits until the app is foregrounded/focused, then invokes local biometric/device authentication.
+9. The phone signs the canonical login transcript with its enrolled key.
+10. Windows reads the proof and the privileged service verifies trust, freshness, signature, account binding, expiry and one-use state.
+11. Only after verification does the Credential Provider receive the bounded authorization/credential material needed for Windows sign-in.
+12. Windows performs the final credential acceptance/rejection.
 
-The service has a SYSTEM-only redemption command for a verified Credential Provider session. It accepts the opaque transaction ID, returns the bound SID exactly once, and rejects pending, wrong-session, repeated, or expired redemption. Both wall-clock and monotonic deadlines bound this handoff. Redemption also rechecks that the trusted phone's device identity and public key, plus the account binding, are still present and unchanged; revocation after proof therefore blocks handoff. That original SID-only handoff does not authorize Windows logon. A custom authentication package remains an option for the public-release architecture, but protected LSA on the pilot laptop prevents loading an unsigned package. Keep native password and Windows Hello recovery available throughout testing.
+## Enrollment
 
-For the one-laptop pilot, the user explicitly authorized a separate encrypted-password route because this Microsoft-account laptop runs protected LSA and cannot load an unsigned custom authentication package. The LocalSystem service has a service-account DPAPI vault, an administrator-only enrollment and rotation command restricted to the bound account SID, and a SYSTEM-only single-use release command after verified phone proof. The Credential Provider builds the standard online-identity credential from the qualified Microsoft-account name and releases it to Windows only after that command succeeds. Password entry happens locally through an interactive PowerShell prompt, never through chat or a command argument. This route has unlocked the target laptop after a live TECNO QR scan and fingerprint approval, including after a reboot. The service starts automatically. This pilot exception does not replace the public-release passwordless architecture above; native Windows sign-in remains available for recovery.
+Enrollment establishes a cryptographic phone identity, not a Bluetooth identity.
 
-The first release binds each trusted phone to one explicit local Windows account SID on the Windows PC where it was enrolled. A Windows installation generates a stable random `laptop_id`; an Android installation generates a new cryptographic `phone_id` during enrollment. Phone identity is cryptographic and is not derived from a Bluetooth address, device name, hostname, or Android installation identifier. The same companion binaries can therefore enroll different PC/phone pairs without code changes.
+The trust record binds:
 
-## Lifecycle states
+- a PhoneKey phone identity/public key;
+- the Windows-side installation/account context;
+- explicit enrollment confirmation.
 
-A login session progresses from `IDLE` to `CREATED`, `DISPLAYED`, `SCANNED`, `BLE_CONNECTED`, `PHONE_AUTHENTICATING`, `PHONE_AUTHENTICATED`, `SIGNATURE_RECEIVED`, `VERIFYING`, `AUTHORIZED`, and finally `CONSUMED`. Any state may fail; any pre-authorized state may expire; and cancellation must invalidate the session.
+Bluetooth addresses, device names, hostnames, and model names are not trusted identities.
 
-Enrollment progresses from QR scan through laptop verification, BLE connection, key creation, local authentication, proof submission, explicit user confirmation, and trust-record commit. Enablement progresses through `DISABLED`, `ENABLING`, `ENABLED`, `DISABLING`, and `SAFE_DISABLED` if a transition fails.
+If the Android application is uninstalled or its app-private key material is destroyed, the replacement installation is a new cryptographic identity and must be enrolled again.
 
-## Repository layout
+## IPC boundary
 
-The implementation is expected to evolve toward separate Android, Windows Credential Provider, Windows LSA, broker, admin, installer, shared protocol, test-vector, and end-to-end test directories. Shared protocol constants must have one canonical source of truth.
+The Windows service runs in a privileged context and communicates with the Credential Provider/admin tools through constrained local IPC.
+
+The service, not the Credential Provider UI, owns policy decisions. IPC input is treated as untrusted, bounded, validated, and tied to explicit transaction state.
+
+## Current pilot credential bridge
+
+The tested single-laptop pilot uses a locally protected encrypted Windows-password compatibility bridge after verified phone proof.
+
+That mechanism:
+
+- stays on the Windows machine;
+- is not sent to the phone;
+- is protected behind the privileged service;
+- is released only through the bounded verified transaction path;
+- is not the desired general public passwordless architecture.
+
+See [PUBLIC-WINDOWS-SIGNIN.md](PUBLIC-WINDOWS-SIGNIN.md).
+
+## Observability
+
+PhoneKey records privacy-safe event stages/timings for debugging. Diagnostics are designed to avoid logging:
+
+- passwords;
+- QR payloads;
+- private keys;
+- proof bytes;
+- account names/SIDs.
+
+BLE troubleshooting and timing-stage interpretation are documented in [BLE-TRANSPORT-TROUBLESHOOTING.md](BLE-TRANSPORT-TROUBLESHOOTING.md).
+
+## Failure behavior
+
+PhoneKey should fail closed.
+
+A stalled BLE connection, expired challenge, mismatched QR/challenge, invalid signature, revoked phone, wrong account binding, unavailable service, malformed IPC request, or consumed transaction must not authorize sign-in.
+
+Native Windows recovery providers remain mandatory while PhoneKey is experimental.
