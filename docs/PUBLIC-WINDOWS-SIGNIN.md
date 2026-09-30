@@ -1,27 +1,62 @@
 # Public Windows sign-in release gate
 
-## Current behavior
+PhoneKey's source is public and open source. This document describes the separate gate for calling the **Windows sign-in feature a general consumer release**.
 
-The installed pilot works for one enrolled TECNO and one Windows laptop. After a fresh QR and phone proof, the LocalSystem service releases that user's locally encrypted password for the current local or Microsoft account once to the Credential Provider, which submits it to Windows. Native Windows PIN/password providers remain available. The local-account route is newly installed but still needs a real local-account sign-in test. This is a local compatibility implementation, not general passwordless authentication.
+## Current pilot behavior
 
-The provider hides its tile for unsupported account types and independently refuses an unsupported selection before showing a QR. Serialization repeats the account check. If one-time password redemption fails, the provider returns a visible retry/PIN message. The release x64 DLL builds and 20 native IPC transport tests pass. The first-attempt stall reported on 24 Sep still needs a fresh real sign-in trace. The provider records privacy-safe event IDs for QR creation (4100), accepted phone proof (4101), redemption start (4102), handoff to Windows (4103), optional Windows acceptance callback (4104), redemption failure (4190), and Windows rejection (4192). It never logs account names, SIDs, QR contents, keys, passwords, or proof bytes. The updated DLL is installed and loaded successfully; a real sign-in test remains necessary.
+A real pilot has completed QR scan, phone biometric approval, signed proof verification, and automatic Windows unlock on one enrolled Windows 11 laptop and one Android phone, including post-restart testing.
 
-## Account support decision
+The current pilot uses a LocalSystem service and a native Credential Provider. For the tested Microsoft-account compatibility path, the Windows machine can keep a locally protected encrypted Windows credential and release it once only after a verified PhoneKey transaction. The credential does not travel to the phone.
 
-| Account type | Current pilot | Public release gate |
+Native Windows PIN/password providers remain available.
+
+This is a local compatibility implementation. It is **not** a general passwordless Windows architecture.
+
+## Current observability
+
+The Windows path records privacy-safe stage IDs such as:
+
+- `4100` — QR/session created;
+- `4105` — BLE discovery started;
+- `4106` — PhoneKey advertisement found;
+- `4107` — challenge delivered;
+- `4108` — proof received/verification started;
+- `4101` — proof accepted;
+- `4102` — credential redemption started;
+- `4103` — credential handed to Windows;
+- `4104` — Windows accepted the credential;
+- `4191` — BLE transport failure;
+- `4194` — challenge expired.
+
+These diagnostics intentionally avoid account names, SIDs, QR contents, keys, passwords, and proof bytes.
+
+## Account support
+
+| Account type | Current project status | General-release gate |
 |---|---|---|
-| Microsoft account | Works on the enrolled laptop with opt-in encrypted password storage | Held until a supported passwordless workstation-authentication route is verified; then test recovery, multi-PC behavior and account-failure reporting. |
-| Local Windows account | Separate encrypted local vault and credential serialization installed; live sign-in not yet verified | Test enrollment, real unlock, account transitions, and recovery on several PCs before release. |
-| Active Directory / Microsoft Entra ID | Not supported | Separate policy, authentication, enrollment and domain-join tests before offering the tile. |
+| Microsoft account | Tested on the enrolled pilot laptop using the local protected compatibility bridge | Define/verify a supported public architecture, then test recovery, multi-PC behavior, password/account changes and failure reporting |
+| Local Windows account | Source contains separate local-account handling; broad live compatibility is not established | Test enrollment, unlock, account transitions and recovery across several PCs |
+| Active Directory / Microsoft Entra ID | Not supported | Separate policy, authentication, enrollment, domain/join and managed-environment testing |
 
-The user selected **hold consumer Microsoft-account public support until a supported passwordless Windows route is verified**. The opt-in stored-password pilot must not be repackaged as the general consumer release. This decision does not remove the user's existing local pilot or its PIN fallback.
+## Why a phone signature is not automatically a Windows logon
 
-Windows' Credential Provider gathers and serializes credentials; the authentication package makes the final decision. A phone signature cannot by itself become a Microsoft-account Windows logon. The old Windows Hello Companion Device Framework is deprecated and must not be used as the public architecture. Microsoft's Web sign-in route targets Entra-joined devices, not all consumer Microsoft accounts. Windows passkey-provider plugins serve website/app passkeys and do not, by themselves, grant workstation logon. Relevant platform documentation: [Credential Providers](https://learn.microsoft.com/en-us/windows/win32/secauthn/credential-providers-in-windows), [Companion Device Framework](https://learn.microsoft.com/en-us/windows-hardware/design/device-experiences/windows-hello-companion-device-framework), [Web sign-in](https://learn.microsoft.com/en-us/windows/security/identity-protection/web-sign-in/), [Windows passkeys](https://learn.microsoft.com/en-us/windows/security/book/identity-protection-passwordless-sign-in).
+The Credential Provider gathers/presents credential material, but the Windows authentication stack makes the final sign-in decision.
 
-## Exit criteria before moving to file encryption
+A PhoneKey signature proves the enrolled phone approved the session. It does not by itself become a Microsoft-account workstation credential.
 
-1. Define and verify which Windows account types are supported, and how each authenticates without silently depending on another user's credential.
-2. Make the sign-in flow observable: phone proof received, provider status, serialization attempted, Windows authentication result, and bounded retry. Log event codes and times only; never log passwords, QR content, keys or account identifiers.
-3. Reproduce or capture enough evidence to classify the intermittent first-attempt stall, then verify the fix through lock/unlock and cold-boot trials. Keep native sign-in available throughout.
-4. Test cancellation, expiry, lost Bluetooth, changed Microsoft password, account mismatch, service crash, and Windows update recovery.
-5. Obtain independent security review of the Credential Provider, service boundary and secret handling before calling this a public sign-in feature.
+Any production design must use a Windows-supported authentication path for the account type being advertised.
+
+## Release criteria
+
+Before PhoneKey should be presented as a general public Windows sign-in product:
+
+1. Define the supported Windows authentication route for every advertised account type.
+2. Keep PhoneKey's signed phone approval cryptographically bound to a fresh, one-use Windows transaction.
+3. Test cancellation, expiry, BLE loss, changed credentials, account mismatch, service crash, reboot, Windows Update, uninstall and rollback.
+4. Validate on multiple Windows machines, Bluetooth adapters and Android devices.
+5. Provide a production installer/uninstaller and stable code signing.
+6. Keep native Windows recovery available and test recovery before release.
+7. Complete an independent security review of the service/IPC/Credential Provider boundaries and secret handling.
+8. Document the supported device/account matrix and known limitations.
+
+The public repository can be useful for review, testing and contribution before these product-release gates are complete.
