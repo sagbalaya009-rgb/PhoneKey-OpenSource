@@ -1,31 +1,42 @@
 # Repository Guide
 
+PhoneKey is organized by platform and security boundary.
+
 | Path | Purpose |
 |---|---|
-| `windows/Cargo.toml` | Recovered Rust workspace |
-| `windows/protocol/` | Protocol, crypto, session, proof and enrollment primitives/tests |
-| `windows/service/` | Authoritative LocalSystem Windows service |
-| `windows/broker/` | Recovered broker/admin utilities retained from Stage-E |
-| `windows/credential-provider/` | Native Credential Provider + IPC transport + transport tests |
-| `android/` | Recovered Android Studio companion project |
-| `docs/` | Current architecture/security/build/test/deployment documentation |
-| `recovery/archives/` | Exact recovered source/history/artifact archives and checksums |
-| `.github/workflows/` | CI and recovery/reconstruction provenance |
-| `SOURCE_OF_TRUTH.md` | Canonical-source declaration |
-| `legacy-source-note.md` | Where the older August layout went |
+| `windows/Cargo.toml` | Rust workspace |
+| `windows/protocol/` | Canonical protocol, crypto, enrollment, session, proof, file-open primitives and tests |
+| `windows/service/` | Privileged Rust Windows LocalSystem service |
+| `windows/broker/` | Broker/admin and BLE diagnostic utilities |
+| `windows/credential-provider/` | Native C++ Windows Credential Provider and transport tests |
+| `windows/file-vault/` | Experimental PhoneKey Files implementation |
+| `android/` | Android Studio companion application |
+| `ios/` | iPhone companion source; not yet validated on physical Apple hardware |
+| `docs/` | Architecture, security, build, test, roadmap and troubleshooting documentation |
+| `.github/workflows/` | CI and manually triggered preview-release automation |
 
 ## Start here
 
 1. `README.md`
-2. `SOURCE_OF_TRUTH.md`
-3. `docs/CURRENT_STATE.md`
-4. `docs/ARCHITECTURE.md`
-5. `docs/SECURITY_MODEL.md`
-6. `docs/BUILD.md`
-7. `docs/TESTING.md`
+2. `SECURITY.md`
+3. `docs/ARCHITECTURE.md`
+4. `docs/SECURITY_MODEL.md`
+5. `docs/BUILD.md`
+6. `docs/TESTING.md`
+7. `docs/PUBLIC-WINDOWS-SIGNIN.md`
+8. `docs/TROUBLESHOOTING.md`
 
-## History
+## Source authority
 
-The August implementation remains available in Git history and the preservation branch. The active tree on the recovery branch is the recovered September implementation.
+The checked-in `main` branch of this public repository is the source tree intended for open-source development.
 
-Do not copy older August files back into the active tree merely because their paths differ. Reconcile behavior intentionally.
+Generated binaries, pairing state, protected machine state, password vaults, signing keys, private recovery artifacts, and developer-machine databases are intentionally excluded from source control.
+
+## Development principle
+
+External platform boundaries remain authoritative:
+
+- Windows LogonUI and the Windows authentication stack decide whether Windows accepts a credential.
+- The privileged PhoneKey service owns PhoneKey authentication policy/state.
+- Android/iOS platform key stores and local-authentication APIs protect phone-side signing keys.
+- BLE is only a transport and must not be treated as identity.
