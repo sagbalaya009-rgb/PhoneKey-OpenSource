@@ -33,7 +33,7 @@ windows = { version = "0.62.2", features = [
     "Storage_Streams"
 ] }
 
-windows-future = "0.3.2"
+windows-future = "0.100.0"
 qrcode = { version = "0.14.1", default-features = false }
 
 [dev-dependencies]
