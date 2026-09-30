@@ -1,0 +1,11 @@
+Windows Registry Editor Version 5.00
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Authentication\Credential Providers\{D32C6E35-E46E-43DC-8175-7DF63A1AC293}]
+@="PhoneKey Credential Provider"
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Classes\CLSID\{D32C6E35-E46E-43DC-8175-7DF63A1AC293}]
+@="PhoneKey Credential Provider"
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Classes\CLSID\{D32C6E35-E46E-43DC-8175-7DF63A1AC293}\InprocServer32]
+@="C:\\Program Files\\PhoneKey\\CredentialProvider\\PhoneKeyCredentialProvider.dll"
+"ThreadingModel"="Apartment"

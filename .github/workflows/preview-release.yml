@@ -1,0 +1,165 @@
+name: PhoneKey Preview Release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: phonekey-preview-release
+  cancel-in-progress: false
+
+jobs:
+  source-safety:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reject obvious private-state files
+        shell: bash
+        run: |
+          set -euo pipefail
+          bad="$(find windows android -type f \
+            \( -name '*.pem' -o -name '*.key' -o -name '*.pfx' -o -name '*.p12' -o -name '*.jks' -o -name '*.keystore' -o -name '.env' -o -name '.env.*' -o -name '*.sqlite' -o -name '*.db' \) -print)"
+          if [[ -n "$bad" ]]; then
+            echo "$bad"
+            exit 1
+          fi
+          if grep -RIlE 'BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY' windows android; then
+            exit 1
+          fi
+
+  windows-preview:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Set up MSBuild
+        uses: microsoft/setup-msbuild@v2
+      - name: Run Windows Rust tests
+        working-directory: windows
+        run: cargo test --workspace --all-targets
+      - name: Build Windows Rust release binaries
+        working-directory: windows
+        run: cargo build --release -p phonekey-service -p broker
+      - name: Build x64 Credential Provider
+        shell: pwsh
+        run: msbuild windows\credential-provider\SampleV2CredentialProvider.vcxproj /m /p:Configuration=Release /p:Platform=x64
+      - name: Assemble Windows preview package
+        shell: pwsh
+        run: ./windows/Build-PhoneKeyPreview.ps1
+      - name: Upload Windows preview
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-preview
+          path: dist/PhoneKey-Windows-Preview.zip
+          if-no-files-found: error
+          retention-days: 30
+
+  android-preview:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - name: Test and build Android previews
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew test assembleDebug --no-daemon
+          cp app/build/outputs/apk/debug/app-debug.apk ../PhoneKey-Android-Preview.apk
+          ./gradlew assembleDebug -PphonekeySideBySideTest=true --no-daemon
+          cp app/build/outputs/apk/debug/app-debug.apk ../PhoneKey-Android-Test.apk
+      - name: Stage Android previews
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          mv PhoneKey-Android-Preview.apk dist/
+          mv PhoneKey-Android-Test.apk dist/
+      - name: Upload Android previews
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-preview
+          path: |
+            dist/PhoneKey-Android-Preview.apk
+            dist/PhoneKey-Android-Test.apk
+          if-no-files-found: error
+          retention-days: 30
+
+  publish-preview:
+    runs-on: ubuntu-latest
+    needs:
+      - source-safety
+      - windows-preview
+      - android-preview
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download Windows preview
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-preview
+          path: release
+      - name: Download Android preview
+        uses: actions/download-artifact@v4
+        with:
+          name: android-preview
+          path: release
+      - name: Create release checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release
+          sha256sum PhoneKey-Windows-Preview.zip PhoneKey-Android-Preview.apk PhoneKey-Android-Test.apk > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+      - name: Publish GitHub prerelease
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          short="${GITHUB_SHA:0:12}"
+          tag="preview-${short}"
+          title="PhoneKey Developer Preview ${GITHUB_SHA:0:7}"
+          notes_file="$(mktemp)"
+          cat > "$notes_file" <<EOF
+          PhoneKey developer preview built from commit \`${GITHUB_SHA}\`.
+
+          Downloads:
+          - **PhoneKey-Android-Preview.apk** — Android developer-preview APK using the normal package ID.
+          - **PhoneKey-Android-Test.apk** — side-by-side Android test APK (`com.PhoneKey.app.test`) that can coexist with an existing PhoneKey installation.
+          - **PhoneKey-Windows-Preview.zip** — Windows x64 service, broker and Credential Provider developer-preview binaries.
+          - **SHA256SUMS.txt** — SHA-256 verification hashes.
+
+          Safety/compatibility:
+          - Windows package is **not a one-click installer**. Use a disposable VM or dedicated test PC only.
+          - Keep the normal Windows PIN/password available.
+          - Android compatibility and Windows/Bluetooth compatibility are not yet broadly validated.
+          - No pairing secrets, password vaults, private keys, or user state are included in these assets.
+          EOF
+
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" \
+              release/PhoneKey-Windows-Preview.zip \
+              release/PhoneKey-Android-Preview.apk \
+              release/PhoneKey-Android-Test.apk \
+              release/SHA256SUMS.txt \
+              --clobber
+            gh release edit "$tag" --title "$title" --notes-file "$notes_file" --prerelease
+          else
+            gh release create "$tag" \
+              release/PhoneKey-Windows-Preview.zip \
+              release/PhoneKey-Android-Preview.apk \
+              release/PhoneKey-Android-Test.apk \
+              release/SHA256SUMS.txt \
+              --target "$GITHUB_SHA" \
+              --title "$title" \
+              --notes-file "$notes_file" \
+              --prerelease
+          fi

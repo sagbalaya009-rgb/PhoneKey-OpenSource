@@ -1,0 +1,88 @@
+name: PhoneKey CI
+
+on:
+  push:
+    branches:
+      - main
+      - recovered-september-2026-09-21
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  rust-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: windows
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Rust format (advisory)
+        continue-on-error: true
+        run: cargo fmt --all -- --check
+      - name: Rust check
+        run: cargo check --workspace --all-targets
+      - name: Rust tests
+        run: cargo test --workspace --all-targets
+      - name: Rust clippy (advisory)
+        continue-on-error: true
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+  credential-provider-transport:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up MSBuild
+        uses: microsoft/setup-msbuild@v2
+      - name: Build lifetime fixture
+        shell: pwsh
+        run: msbuild windows\credential-provider\tests\PhoneKeyTransportLifetimeFixture.vcxproj /m /p:Configuration=Release /p:Platform=x64
+      - name: Build transport tests
+        shell: pwsh
+        run: msbuild windows\credential-provider\tests\PhoneKeyTransportTests.vcxproj /m /p:Configuration=Release /p:Platform=x64
+      - name: Run transport tests
+        shell: pwsh
+        run: |
+          $test = Get-ChildItem windows\credential-provider\tests -Recurse -Filter PhoneKeyTransportTests.exe | Select-Object -First 1
+          if (-not $test) { throw "PhoneKeyTransportTests.exe not found" }
+          & $test.FullName
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+  android-unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - name: Android unit tests
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew test --no-daemon
+
+  source-safety:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reject obvious private-state files
+        shell: bash
+        run: |
+          set -euo pipefail
+          bad="$(find windows android -type f \
+            \( -name '*.pem' -o -name '*.key' -o -name '*.pfx' -o -name '*.p12' -o -name '*.jks' -o -name '*.keystore' -o -name '.env' -o -name '.env.*' -o -name '*.sqlite' -o -name '*.db' \) -print)"
+          if [[ -n "$bad" ]]; then
+            echo "$bad"
+            exit 1
+          fi
+          if grep -RIlE 'BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY' windows android; then
+            exit 1
+          fi

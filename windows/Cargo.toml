@@ -1,0 +1,9 @@
+[workspace]
+resolver = "3"
+
+members = [
+    "protocol",
+    "broker",
+    "service",
+    "file-vault",
+]

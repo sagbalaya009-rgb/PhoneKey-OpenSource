@@ -1,0 +1,68 @@
+# Build outputs
+target/
+**/target/
+build/
+build-*/
+dist/
+out/
+bin/
+obj/
+*.o
+*.obj
+*.dll
+*.exe
+*.so
+*.class
+*.apk
+*.aab
+*.pdb
+*.ilk
+
+# Android / Gradle / IDE
+.gradle/
+local.properties
+.idea/
+*.iml
+.vscode/
+.vs/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# Logs, dumps, temp/backups
+*.log
+*.dmp
+*.tmp
+*.temp
+*~
+*.swp
+
+# Local security state / secrets
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.pfx
+*.p12
+*.jks
+*.keystore
+*.db
+*.sqlite
+*.sqlite3
+protected-state/
+enrollment-state/
+pairing-state/
+secrets/
+
+# VM artifacts
+*.vhd
+*.vhdx
+*.vmdk
+*.ova
+*.ovf
+
+# Keep searchable specification text
+!docs/PhoneKey_Implementation_Specification.txt

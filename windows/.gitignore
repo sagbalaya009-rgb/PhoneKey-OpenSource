@@ -1,0 +1,47 @@
+﻿# Rust build output
+/target/
+/target-*/
+/broker/target/
+/protocol/target/
+/service/target/
+
+# Temporary VM transfer files
+/vm-transfer/
+
+# Preserved pre-root Git metadata
+/broker/.git-pre-root-*/
+/protocol/.git-pre-root-*/
+
+# Generated backups
+*.backup
+
+# Logs and generated diagnostics
+*.log
+*.stderr.txt
+*.stdout.txt
+phonekey-*-audit.txt
+phonekey-*-result.txt
+
+# Native build products
+*.exe
+*.dll
+*.pdb
+*.obj
+*.lib
+*.exp
+*.ilk
+
+# IDE / editor state
+.vs/
+.idea/
+*.user
+*.suo
+
+# Temporary files
+*.tmp
+*.bak
+
+# Credential Provider generated Visual Studio output
+/credential-provider/SampleV2.98E74D71/
+/credential-provider/x64/
+/credential-provider/tests/PhoneKey.*/

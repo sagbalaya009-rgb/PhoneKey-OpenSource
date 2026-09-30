@@ -1,0 +1,32 @@
+﻿[package]
+name = "broker"
+version = "0.1.0"
+edition = "2024"
+default-run = "broker"
+
+[dependencies]
+phonekey-protocol = { path = "../protocol" }
+
+windows = { version = "0.62.2", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_System_Pipes",
+    "Win32_System_Threading",
+    "Win32_Storage_FileSystem",
+    "Devices_Bluetooth",
+    "Devices_Bluetooth_Advertisement",
+    "Devices_Bluetooth_GenericAttributeProfile",
+    "Foundation",
+    "Foundation_Collections",
+    "Security_Cryptography",
+    "Storage_Streams"
+] }
+
+windows-future = "0.3.2"
+rand = "0.9"
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+
