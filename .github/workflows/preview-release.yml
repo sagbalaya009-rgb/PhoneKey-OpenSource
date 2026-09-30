@@ -102,12 +102,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Download Windows preview
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: windows-preview
           path: release
       - name: Download Android preview
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: android-preview
           path: release
