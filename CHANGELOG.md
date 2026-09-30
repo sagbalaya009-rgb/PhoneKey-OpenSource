@@ -1,13 +1,19 @@
 # Changelog
 
-## Unreleased — preservation branch
-- Added canonical current-state, architecture, security, build, test, VM, deployment, repository, history, roadmap and troubleshooting documentation.
-- Recorded the critical discrepancy between the Aug-27 GitHub baseline and later September Windows development.
-- Explicitly separated checked-in implementation from historical verified observations.
-- Preserved fail-closed/recovery-first constraints and prohibited speculative reconstruction of missing authentication source.
+## Unreleased
 
-## 2026-08-27
-- Established protocol/broker foundations.
-- Added Android and native authorization boundaries.
-- Added pairing, persistent broker state and portable testing guidance.
-- Added recovery-first administration tooling.
+- Published the clean open-source PhoneKey source tree under Apache-2.0.
+- Added the Rust Windows service, shared protocol, native Credential Provider, Android companion, iOS source, and experimental PhoneKey Files subsystem.
+- Added public CI, source-safety checks, security policy, contribution guidance, BLE troubleshooting, and developer-preview build automation.
+- Documented the current public Windows sign-in release gate and compatibility limits.
+
+## 2026-09 — pilot milestone
+
+- Completed a real Windows 11 QR + phone biometric + automatic unlock pilot on one enrolled Windows laptop and Android phone.
+- Added privacy-safe sign-in event stages and Android BLE timing diagnostics.
+- Investigated intermittent Windows/Realtek BLE transport stalls and documented recovery/testing procedures.
+- Added repeated protocol, service, Android, and native Credential Provider tests.
+
+## Earlier development
+
+- Established the PhoneKey signed challenge/proof protocol, enrollment model, broker/service boundaries, Android companion, and Windows native integration foundations.
