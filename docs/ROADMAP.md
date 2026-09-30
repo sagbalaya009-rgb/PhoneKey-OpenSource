@@ -1,52 +1,64 @@
 # Roadmap
 
-## COMPLETE / PRESERVED
+PhoneKey is open source, but the current developer previews are not yet a production consumer release.
 
-- August GitHub baseline preserved in history.
-- Original implementation specification preserved.
-- September Windows Stage-E source recovered.
-- Local Stage-D → Stage-E Git history preserved as a portable bundle.
-- Android Studio source recovered.
-- September recovery/source artifacts preserved with SHA-256 manifests.
-- Canonical recovered source reconstructed into normal `windows/` and `android/` paths.
-- Repository documentation updated to the recovered architecture.
+## Current — public source and reproducible validation
 
-## NEXT: REPRODUCIBLE VALIDATION
+- Keep Windows Rust workspace checks/tests green.
+- Keep native Credential Provider transport/lifetime tests green.
+- Keep Android unit tests and debug builds green.
+- Keep source-safety and secret-scanning gates enabled.
+- Maintain clear separation between the tested pilot compatibility path and the intended public authentication architecture.
 
-- Windows Rust workspace fmt/check/test/clippy.
-- Native Credential Provider transport/lifetime build and test.
-- Android unit tests and debug build.
-- Review CI failures against the recovered historical environment rather than altering security semantics merely to make CI green.
+## Next — Windows release engineering
 
-## NEXT: DISPOSABLE WINDOWS VM
+- Build a reviewed installer/uninstaller with deterministic rollback.
+- Add stable code signing for Windows components.
+- Validate install, update, disable, uninstall, and Windows Update recovery.
+- Expand negative LogonUI tests for service crash, BLE loss, cancellation, expiry, replay, account mismatch, and corrupted state.
+- Test across multiple Windows 11 machines and Bluetooth adapters.
 
-- build service + CP from exact GitHub commit;
-- install service and confirm Running / Auto / LocalSystem;
-- verify named-pipe ACL/ownership and unauthorized-caller rejection;
-- register/unregister CP;
-- verify tile stability under Win+L;
-- validate timeout/cancellation/crash paths;
-- verify rollback and native Windows recovery provider availability.
+## Next — broader Android/BLE compatibility
 
-## NEXT: REAL ANDROID + BLE
+- Test multiple Android vendors and OS versions.
+- Measure BLE discovery/connection/GATT reliability across common chipsets.
+- Validate permission, backgrounding, biometric interruption, screen rotation, and reconnect behavior.
+- Establish a documented supported-device capability matrix.
 
-- install companion app on a physical Android phone;
-- test BLE from LocalSystem service context;
-- perform enrollment;
-- verify trusted pairing/account binding;
-- challenge/proof happy path;
-- replay/stale/wrong-device/wrong-account negatives;
-- reboot/persistence/revocation/re-enrollment.
+## Public authentication architecture
 
-## LATER
+The current pilot can bridge verified phone approval into ordinary Windows credentials using locally protected state. That compatibility path is not the desired general consumer architecture.
 
-- determine final credential serialization/authentication integration after security review;
-- code signing;
-- production installer/uninstaller;
-- structured telemetry/audit logs without secrets;
-- independent security review and threat-model review;
-- release engineering.
+Before calling PhoneKey a general public Windows sign-in product:
 
-## NOT A GOAL YET
+- define a supported Windows authentication route for each advertised account type;
+- avoid presenting the pilot password-vault bridge as passwordless;
+- verify recovery and account-transition behavior;
+- complete independent security review.
 
-Production deployment. Recovery paths and native Windows providers remain mandatory throughout development.
+See [PUBLIC-WINDOWS-SIGNIN.md](PUBLIC-WINDOWS-SIGNIN.md).
+
+## PhoneKey Files
+
+Continue hardening the experimental file-vault path:
+
+- physical-device testing across larger files;
+- key lifecycle/recovery UX;
+- tamper/corruption handling;
+- Windows shell integration safety;
+- independent review before real-document recommendations.
+
+## iOS
+
+- build the current source on macOS;
+- run unit tests;
+- validate on a physical iPhone;
+- verify BLE behavior against a clean Windows test environment;
+- do not claim iOS compatibility until those tests pass.
+
+## Not yet
+
+- broad consumer deployment;
+- removal of native Windows recovery providers;
+- enterprise AD/Entra support claims;
+- production compatibility claims without a tested device/account matrix.
