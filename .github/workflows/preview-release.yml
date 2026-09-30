@@ -52,7 +52,7 @@ jobs:
         shell: pwsh
         run: ./windows/Build-PhoneKeyPreview.ps1
       - name: Upload Windows preview
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: windows-preview
           path: dist/PhoneKey-Windows-Preview.zip
@@ -84,7 +84,7 @@ jobs:
           mv PhoneKey-Android-Preview.apk dist/
           mv PhoneKey-Android-Test.apk dist/
       - name: Upload Android previews
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: android-preview
           path: |
