@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - recovered-september-2026-09-21
   pull_request:
     branches:
       - main
@@ -77,12 +76,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          bad="$(find windows android -type f \
+          bad="$(find windows android ios docs -type f \
             \( -name '*.pem' -o -name '*.key' -o -name '*.pfx' -o -name '*.p12' -o -name '*.jks' -o -name '*.keystore' -o -name '.env' -o -name '.env.*' -o -name '*.sqlite' -o -name '*.db' \) -print)"
           if [[ -n "$bad" ]]; then
             echo "$bad"
             exit 1
           fi
-          if grep -RIlE 'BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY' windows android; then
+          if grep -RIlE 'BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY' windows android ios docs; then
+            exit 1
+          fi
+          if grep -RIlE 'github_pat_[A-Za-z0-9_]+|ghp_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{30,}|xox[baprs]-[0-9A-Za-z-]{10,}|sk-proj-[A-Za-z0-9_-]{20,}' windows android ios docs; then
             exit 1
           fi
