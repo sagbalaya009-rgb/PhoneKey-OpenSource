@@ -64,7 +64,12 @@ class PhoneKeyGattServer(
     private var gattServer:
         BluetoothGattServer? = null
 
-    private var advertising = false
+    // The callback is assigned before startAdvertising returns. A QR rescan
+    // can therefore stop even a request whose success callback is still queued.
+    private val advertiseLock = Any()
+    private var activeAdvertiseCallback: AdvertiseCallback? = null
+    private var advertiseGeneration = 0L
+    @Volatile private var bleClientConnected = false
     private val mainHandler = Handler(Looper.getMainLooper())
 
     @Volatile
@@ -124,13 +129,33 @@ class PhoneKeyGattServer(
         }
 
         if (gattServer != null) {
-            // The TECNO may stop an advertiser while leaving its GATT server
-            // object alive. A new scan must renew discovery, not silently
-            // return with a server that Windows can no longer find.
+            val active = synchronized(advertiseLock) { activeAdvertiseCallback != null }
+            if (active) {
+                // Windows begins discovery when it creates the QR. Interrupting
+                // an already active advertiser when the camera opens races its
+                // connection and can strand the phone before the challenge.
+                val generation = synchronized(advertiseLock) { advertiseGeneration }
+                mainHandler.postDelayed({
+                    if (gattServer != null && !bleClientConnected &&
+                        synchronized(advertiseLock) { advertiseGeneration == generation }) {
+                        Log.i("PhoneKeyTiming", "ble_idle_advertiser_refresh")
+                        stopAdvertising()
+                        mainHandler.postDelayed({
+                            if (gattServer != null && !bleClientConnected) startAdvertising()
+                        }, 200)
+                    }
+                }, 8000)
+                return
+            }
+            // A failed or stopped advertiser can leave the GATT server alive.
             stopAdvertising()
             onStatusChanged("Refreshing PhoneKey BLE advertising...")
+            val generation = synchronized(advertiseLock) { advertiseGeneration }
             mainHandler.postDelayed({
-                if (gattServer != null) startAdvertising()
+                if (gattServer != null &&
+                    synchronized(advertiseLock) { advertiseGeneration == generation }) {
+                    startAdvertising()
+                }
             }, 200)
             return
         }
@@ -141,6 +166,7 @@ class PhoneKeyGattServer(
     @SuppressLint("MissingPermission")
     fun stop() {
         stopAdvertising()
+        bleClientConnected = false
 
         gattServer?.close()
         gattServer = null
@@ -278,12 +304,14 @@ class PhoneKeyGattServer(
                 when (newState) {
                     BluetoothProfile.STATE_CONNECTED ->
                         {
+                            bleClientConnected = true
                             Log.i("PhoneKeyTiming", "ble_client_connected")
                             onStatusChanged("Windows BLE client connected")
                         }
 
                     BluetoothProfile.STATE_DISCONNECTED ->
                         {
+                            bleClientConnected = false
                             preparedFileWrite.clear()
                             Log.i("PhoneKeyTiming", "ble_client_disconnected")
                             onStatusChanged("BLE client disconnected")
@@ -537,10 +565,6 @@ class PhoneKeyGattServer(
                     return
                 }
 
-        if (advertising) {
-            return
-        }
-
         val settings =
             AdvertiseSettings.Builder()
                 .setAdvertiseMode(
@@ -566,12 +590,42 @@ class PhoneKeyGattServer(
                 )
                 .build()
 
-        advertiser.startAdvertising(
-            settings,
-            data,
-            advertiseCallback
-        )
-        Log.i("PhoneKeyTiming", "ble_advertise_requested")
+        synchronized(advertiseLock) {
+            if (activeAdvertiseCallback != null) return
+            val callback = object : AdvertiseCallback() {
+                override fun onStartSuccess(settingsInEffect: AdvertiseSettings) {
+                    if (synchronized(advertiseLock) { activeAdvertiseCallback === this }) {
+                        Log.i("PhoneKeyTiming", "ble_advertising_ready")
+                        onStatusChanged("PhoneKey is advertising over BLE")
+                    } else {
+                        // A late success belongs to a canceled QR scan.
+                        try { advertiser.stopAdvertising(this) } catch (_: Exception) { }
+                    }
+                }
+
+                override fun onStartFailure(errorCode: Int) {
+                    val current = synchronized(advertiseLock) {
+                        if (activeAdvertiseCallback === this) {
+                            activeAdvertiseCallback = null
+                            true
+                        } else false
+                    }
+                    if (current) {
+                        Log.i("PhoneKeyTiming", "ble_advertising_failed_code=$errorCode")
+                        onStatusChanged("BLE advertising failed: $errorCode")
+                    }
+                }
+            }
+            activeAdvertiseCallback = callback
+            try {
+                advertiser.startAdvertising(settings, data, callback)
+            } catch (error: Exception) {
+                activeAdvertiseCallback = null
+                onStatusChanged("BLE advertising could not start: ${error.message}")
+                return
+            }
+            Log.i("PhoneKeyTiming", "ble_advertise_requested")
+        }
 
         onStatusChanged(
             "Starting PhoneKey BLE advertising..."
@@ -580,51 +634,21 @@ class PhoneKeyGattServer(
 
     @SuppressLint("MissingPermission")
     private fun stopAdvertising() {
-        // stopAdvertising is safe to call for the same callback even when the
-        // start callback has not fired yet. Do not gate this on our local
-        // `advertising` flag: some phones can have a start request in flight
-        // while that flag is still false, which previously made a refresh a
-        // no-op and left Windows unable to rediscover PhoneKey after QR scan.
-        if (hasRequiredPermissions()) {
-            bluetoothAdapter
-                .bluetoothLeAdvertiser
-                ?.stopAdvertising(
-                    advertiseCallback
-                )
+        val callback = synchronized(advertiseLock) {
+            advertiseGeneration++
+            val previous = activeAdvertiseCallback
+            activeAdvertiseCallback = null
+            previous
         }
-
-        advertising =
-            false
+        if (callback != null && hasRequiredPermissions()) {
+            try {
+                bluetoothAdapter.bluetoothLeAdvertiser?.stopAdvertising(callback)
+                Log.i("PhoneKeyTiming", "ble_advertiser_stop_requested")
+            } catch (error: Exception) {
+                onStatusChanged("BLE advertising stop failed: ${error.message}")
+            }
+        }
     }
-
-    private val advertiseCallback =
-        object : AdvertiseCallback() {
-
-            override fun onStartSuccess(
-                settingsInEffect:
-                    AdvertiseSettings
-            ) {
-                Log.i("PhoneKeyTiming", "ble_advertising_ready")
-                advertising =
-                    true
-
-                onStatusChanged(
-                    "PhoneKey is advertising over BLE"
-                )
-            }
-
-            override fun onStartFailure(
-                errorCode: Int
-            ) {
-                Log.i("PhoneKeyTiming", "ble_advertising_failed_code=$errorCode")
-                advertising =
-                    false
-
-                onStatusChanged(
-                    "BLE advertising failed: $errorCode"
-                )
-            }
-        }
 
     private fun hasRequiredPermissions():
         Boolean {

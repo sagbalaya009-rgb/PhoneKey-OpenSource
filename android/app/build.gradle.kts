@@ -4,6 +4,7 @@ plugins {
 }
 
 val sideBySideTest = providers.gradleProperty("phonekeySideBySideTest").orNull == "true"
+val testSuffix = providers.gradleProperty("phonekeyTestSuffix").orNull ?: ".test"
 
 android {
     namespace = "com.PhoneKey.app"
@@ -24,7 +25,7 @@ android {
 
     buildTypes {
         debug {
-            if (sideBySideTest) applicationIdSuffix = ".test"
+            if (sideBySideTest) applicationIdSuffix = testSuffix
         }
         release {
             optimization {

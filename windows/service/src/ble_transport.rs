@@ -14,7 +14,7 @@ use windows_future::{AsyncStatus, IAsyncOperation};
 use windows::Devices::Bluetooth::{
     Advertisement::{
         BluetoothLEAdvertisementReceivedEventArgs, BluetoothLEAdvertisementWatcher,
-        BluetoothLEScanningMode,
+        BluetoothLEAdvertisementWatcherStatus, BluetoothLEScanningMode,
     },
     BluetoothAddressType, BluetoothCacheMode, BluetoothLEDevice,
 };
@@ -187,16 +187,16 @@ pub fn exchange_login(
     >::new(
         move |_sender: Ref<'_, BluetoothLEAdvertisementWatcher>,
               args: Ref<'_, BluetoothLEAdvertisementReceivedEventArgs>| {
-            let args = args.ok()?;
-
-            let advertisement = args.Advertisement()?;
-
-            let service_uuids = advertisement.ServiceUuids()?;
+            // Ignore a failed property read from an unrelated advertisement;
+            // returning an error from this COM callback can abort the scan.
+            let Ok(args) = args.ok() else { return Ok(()); };
+            let Ok(advertisement) = args.Advertisement() else { return Ok(()); };
+            let Ok(service_uuids) = advertisement.ServiceUuids() else { return Ok(()); };
 
             for uuid in service_uuids {
                 if uuid == PHONEKEY_SERVICE_UUID {
-                    let address = args.BluetoothAddress()?;
-                    let address_type = args.BluetoothAddressType()?;
+                    let Ok(address) = args.BluetoothAddress() else { break; };
+                    let Ok(address_type) = args.BluetoothAddressType() else { break; };
                     let packed = address | ((address_type.0 as u64) << 48);
 
                     let _ = callback_device.compare_exchange(
@@ -225,6 +225,10 @@ pub fn exchange_login(
     while !cancelled()? {
         if found_device.load(Ordering::SeqCst) != 0 {
             break;
+        }
+
+        if watcher.Status()? == BluetoothLEAdvertisementWatcherStatus::Aborted {
+            return Err(transport_error("PhoneKey BLE scan aborted by Windows"));
         }
 
         thread::sleep(ble_lifecycle::POLL);
