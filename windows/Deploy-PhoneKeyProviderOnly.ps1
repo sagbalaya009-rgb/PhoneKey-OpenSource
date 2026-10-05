@@ -1,12 +1,12 @@
 #Requires -RunAsAdministrator
 [CmdletBinding()]
 param(
-    [string] $SourcePath = (Join-Path $PSScriptRoot 'credential-provider\x64\Release\SampleV2CredentialProvider.dll'),
+    [string] $SourcePath,
     [ValidatePattern('^[0-9a-fA-F]{64}$')]
     [string] $ExpectedSha256
 )
 $ErrorActionPreference = 'Stop'
-$source = $SourcePath
+$source = if ($SourcePath) { $SourcePath } else { Join-Path $PSScriptRoot 'credential-provider\x64\Release\SampleV2CredentialProvider.dll' }
 $target = 'C:\Program Files\PhoneKey\CredentialProvider\PhoneKeyCredentialProvider.dll'
 $result = Join-Path $env:TEMP 'PhoneKey.ProviderDeploy.Result.txt'
 $backup = "$target.$((Get-Date).ToUniversalTime().ToString('yyyyMMdd-HHmmss')).bak"

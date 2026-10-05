@@ -77,3 +77,14 @@ fails this fixture; the corrected source passes, and the native DLL builds.
 This is evidence of a real lost-approval defect. The corrected pair still needs
 a fresh consecutive live run; the failed four-attempt run is not counted as a
 successful reliability test.
+
+
+The native fix was installed and two fresh sign-ins exercised retained approval
+and automatic Windows acceptance. The next attempt failed during uncached GATT
+service discovery, before a challenge or biometric request reached the phone.
+The repeated test stopped. An additional connection race was removed: starting
+an already active advertiser no longer schedules a timed stop/restart. The
+previous eight-second refresh could run after Windows selected an advertisement
+but before Android reported the client connected, interrupting connection
+establishment. Android tests and the separate-package APK build passed after
+removing this timer. Further real repeated testing remains required.

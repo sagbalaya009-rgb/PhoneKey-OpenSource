@@ -135,17 +135,8 @@ class PhoneKeyGattServer(
                 // Windows begins discovery when it creates the QR. Interrupting
                 // an already active advertiser when the camera opens races its
                 // connection and can strand the phone before the challenge.
-                val generation = synchronized(advertiseLock) { advertiseGeneration }
-                mainHandler.postDelayed({
-                    if (gattServer != null && !bleClientConnected &&
-                        synchronized(advertiseLock) { advertiseGeneration == generation }) {
-                        Log.i("PhoneKeyTiming", "ble_idle_advertiser_refresh")
-                        stopAdvertising()
-                        mainHandler.postDelayed({
-                            if (gattServer != null && !bleClientConnected) startAdvertising()
-                        }, 200)
-                    }
-                }, 8000)
+                // Do not refresh an active advertiser on a timer: Windows may
+                // have selected its address while GATT is still connecting.
                 return
             }
             // A failed or stopped advertiser can leave the GATT server alive.
