@@ -170,6 +170,9 @@ public:
     CSampleCredential();
 
 private:
+#ifdef PHONEKEY_SELECTION_TESTS
+    friend class PhoneKeyCredentialSelectionTestAccess;
+#endif
     /*
      * Updates only the visible PhoneKey status text.
      * This does not submit or serialize a Windows credential.

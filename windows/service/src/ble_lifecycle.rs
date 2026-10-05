@@ -11,8 +11,9 @@ use std::time::{Duration, Instant};
 pub type BleError = Box<dyn Error + Send + Sync>;
 pub const POLL: Duration = Duration::from_millis(20);
 pub const CANCEL_GRACE: Duration = Duration::from_secs(2);
-// Transport cap cannot extend the authority's independent 45-second deadline.
-const MAX_EXCHANGE_MS: u64 = 45_000;
+// Use the protocol lifetime so transport cannot expire while the displayed
+// QR and authority challenge are still valid. The authority remains final.
+const MAX_EXCHANGE_MS: u64 = phonekey_protocol::types::MAX_LOGIN_SESSION_TTL_MS;
 
 /// Wall-clock expiry remains authoritative; monotonic time also prevents a
 /// backward clock adjustment from extending an already-running exchange.
@@ -404,6 +405,17 @@ mod tests {
     #[test]
     fn forward_clock_expires_exchange() {
         assert!(Deadline::new(1000, 5000).unwrap().expired(5000));
+    }
+    #[test]
+    fn transport_allows_the_full_protocol_lifetime_without_extending_it() {
+        let ttl = phonekey_protocol::types::MAX_LOGIN_SESSION_TTL_MS;
+        let before = Instant::now();
+        let deadline = Deadline::new(1000, 1000 + ttl).unwrap();
+        assert!(deadline.until >= before + Duration::from_millis(ttl));
+        assert!(!deadline.expired(1000 + ttl - 1));
+        assert!(deadline.expired(1000 + ttl));
+        let remaining = Deadline::new(1000 + ttl - 5000, 1000 + ttl).unwrap();
+        assert!(remaining.until <= Instant::now() + Duration::from_millis(5000));
     }
     #[test]
     fn overlapping_jobs_are_rejected_and_shutdown_joins() {

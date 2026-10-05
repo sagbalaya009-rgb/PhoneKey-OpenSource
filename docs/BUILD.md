@@ -58,3 +58,17 @@ On Linux/macOS use `./gradlew`.
 ## Output policy
 
 Do not commit normal build outputs, IDE caches, `local.properties`, real machine/pairing/enrollment state, keys or credentials. Recovery archives under `recovery/archives/` are intentional checksum-indexed historical artifacts. The two explicitly labelled, checksum-indexed developer-preview binaries under `dist/` are a one-time exception requested for sharing; they are not release installers and contain no enrolled state.
+
+## Guarded Windows installer source
+
+`windows/installer/Build-PhoneKeyInstaller.ps1` builds a setup preview from
+locally built release service/broker and x64 Credential Provider components.
+Run the resulting EXE with `--preflight` for a read-only prerequisite check.
+This public repository contains installer source, not a newly verified release
+binary. The preview supports clean Windows 11 x64 local-account PCs, stages
+the service with the sign-in tile disabled, and enables the tile only after
+pairing and local-account password enrollment. It refuses an existing PhoneKey
+installation and Microsoft-account profiles. Clean-PC installation, pairing,
+sign-in and uninstall remain unverified; do not treat the six pilot sign-ins
+as installer validation. The setup preview has not been rebuilt with the latest
+BLE fixes during this investigation.

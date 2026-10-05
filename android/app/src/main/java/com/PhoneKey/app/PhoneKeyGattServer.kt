@@ -61,10 +61,16 @@ class PhoneKeyGattServer(
     private val bluetoothAdapter
         get() = bluetoothManager.adapter
 
-    private var gattServer:
+    @Volatile private var gattServer:
         BluetoothGattServer? = null
+    private val gattGeneration = AtomicLong(0)
 
-    private var advertising = false
+    // The callback is assigned before startAdvertising returns. A QR rescan
+    // can therefore stop even a request whose success callback is still queued.
+    private val advertiseLock = Any()
+    private var activeAdvertiseCallback: AdvertiseCallback? = null
+    private var advertiseGeneration = 0L
+    @Volatile private var bleClientConnected = false
     private val mainHandler = Handler(Looper.getMainLooper())
 
     @Volatile
@@ -124,13 +130,24 @@ class PhoneKeyGattServer(
         }
 
         if (gattServer != null) {
-            // The TECNO may stop an advertiser while leaving its GATT server
-            // object alive. A new scan must renew discovery, not silently
-            // return with a server that Windows can no longer find.
+            val active = synchronized(advertiseLock) { activeAdvertiseCallback != null }
+            if (active) {
+                // Windows begins discovery when it creates the QR. Interrupting
+                // an already active advertiser when the camera opens races its
+                // connection and can strand the phone before the challenge.
+                // Do not refresh an active advertiser on a timer: Windows may
+                // have selected its address while GATT is still connecting.
+                return
+            }
+            // A failed or stopped advertiser can leave the GATT server alive.
             stopAdvertising()
             onStatusChanged("Refreshing PhoneKey BLE advertising...")
+            val generation = synchronized(advertiseLock) { advertiseGeneration }
             mainHandler.postDelayed({
-                if (gattServer != null) startAdvertising()
+                if (gattServer != null &&
+                    synchronized(advertiseLock) { advertiseGeneration == generation }) {
+                    startAdvertising()
+                }
             }, 200)
             return
         }
@@ -140,7 +157,10 @@ class PhoneKeyGattServer(
 
     @SuppressLint("MissingPermission")
     fun stop() {
+        gattGeneration.incrementAndGet()
         stopAdvertising()
+        bleClientConnected = false
+        preparedFileWrite.clear()
 
         gattServer?.close()
         gattServer = null
@@ -154,10 +174,11 @@ class PhoneKeyGattServer(
 
     @SuppressLint("MissingPermission")
     private fun createGattServer() {
+        val generation = gattGeneration.incrementAndGet()
         val server =
             bluetoothManager.openGattServer(
                 context,
-                gattServerCallback
+                newGattServerCallback(generation)
             )
 
         if (server == null) {
@@ -229,14 +250,20 @@ class PhoneKeyGattServer(
         )
     }
 
-    private val gattServerCallback =
+    private fun newGattServerCallback(generation: Long) =
         object :
             BluetoothGattServerCallback() {
+
+            override fun onMtuChanged(device: android.bluetooth.BluetoothDevice, mtu: Int) {
+                if (gattGeneration.get() != generation) return
+                Log.i("PhoneKeyTiming", "ble_mtu=$mtu")
+            }
 
             override fun onServiceAdded(
                 status: Int,
                 service: BluetoothGattService
             ) {
+                if (gattGeneration.get() != generation) return
                 if (
                     service.uuid !=
                     SERVICE_UUID
@@ -254,8 +281,7 @@ class PhoneKeyGattServer(
 
                     startAdvertising()
                 } else {
-                    gattServer?.close()
-                    gattServer = null
+                    stop()
                     onStatusChanged(
                         "Failed to create GATT service: $status"
                     )
@@ -268,6 +294,11 @@ class PhoneKeyGattServer(
                 status: Int,
                 newState: Int
             ) {
+                if (gattGeneration.get() != generation) return
+                if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                    bleClientConnected = false
+                    preparedFileWrite.clear()
+                }
                 if (status != BluetoothGatt.GATT_SUCCESS) {
                     onStatusChanged(
                         "BLE client connection failed: $status"
@@ -278,12 +309,14 @@ class PhoneKeyGattServer(
                 when (newState) {
                     BluetoothProfile.STATE_CONNECTED ->
                         {
+                            bleClientConnected = true
                             Log.i("PhoneKeyTiming", "ble_client_connected")
                             onStatusChanged("Windows BLE client connected")
                         }
 
                     BluetoothProfile.STATE_DISCONNECTED ->
                         {
+                            bleClientConnected = false
                             preparedFileWrite.clear()
                             Log.i("PhoneKeyTiming", "ble_client_disconnected")
                             onStatusChanged("BLE client disconnected")
@@ -303,6 +336,7 @@ class PhoneKeyGattServer(
                 offset: Int,
                 value: ByteArray
             ) {
+                if (gattGeneration.get() != generation) return
                 if (characteristic.uuid == CHALLENGE_UUID && preparedWrite) {
                     val valid = try {
                         preparedFileWrite.append(device.address, offset, value)
@@ -311,6 +345,8 @@ class PhoneKeyGattServer(
                         preparedFileWrite.clear()
                         false
                     }
+                    if (offset == 0) Log.i("PhoneKeyTiming", "ble_prepared_write_started")
+                    if (!valid) Log.i("PhoneKeyTiming", "ble_prepared_write_rejected")
                     if (responseNeeded) {
                         gattServer?.sendResponse(
                             device, requestId,
@@ -370,10 +406,12 @@ class PhoneKeyGattServer(
                 requestId: Int,
                 execute: Boolean
             ) {
+                if (gattGeneration.get() != generation) return
                 val payload = try {
-                    preparedFileWrite.finish(device.address, execute)
+                    preparedFileWrite.finishChallenge(device.address, execute)
                 } catch (error: IllegalArgumentException) {
                     preparedFileWrite.clear()
+                    Log.i("PhoneKeyTiming", "ble_prepared_execute_rejected")
                     gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_FAILURE, 0, null)
                     return
                 }
@@ -381,19 +419,10 @@ class PhoneKeyGattServer(
                     gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
                     return
                 }
-                val validFileRequest = try {
-                    PhoneKeyProtocol.decodeFileOpenChallenge(payload)
-                    true
-                } catch (error: Exception) {
-                    false
-                }
-                if (!validFileRequest) {
-                    gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_FAILURE, 0, null)
-                    return
-                }
                 clearProofPayload()
                 gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
-                onStatusChanged("Encrypted-file challenge received (${payload.size} bytes)")
+                Log.i("PhoneKeyTiming", "ble_prepared_challenge_received")
+                onStatusChanged("PhoneKey challenge received (${payload.size} bytes)")
                 onChallengeReceived(payload)
             }
 
@@ -406,6 +435,7 @@ class PhoneKeyGattServer(
                 characteristic:
                     BluetoothGattCharacteristic
             ) {
+                if (gattGeneration.get() != generation) return
                 if (
                     characteristic.uuid !=
                     PROOF_UUID
@@ -491,6 +521,7 @@ class PhoneKeyGattServer(
                 offset: Int,
                 value: ByteArray
             ) {
+                if (gattGeneration.get() != generation) return
                 if (
                     descriptor.uuid ==
                     CLIENT_CONFIGURATION_UUID
@@ -537,10 +568,6 @@ class PhoneKeyGattServer(
                     return
                 }
 
-        if (advertising) {
-            return
-        }
-
         val settings =
             AdvertiseSettings.Builder()
                 .setAdvertiseMode(
@@ -566,12 +593,42 @@ class PhoneKeyGattServer(
                 )
                 .build()
 
-        advertiser.startAdvertising(
-            settings,
-            data,
-            advertiseCallback
-        )
-        Log.i("PhoneKeyTiming", "ble_advertise_requested")
+        synchronized(advertiseLock) {
+            if (activeAdvertiseCallback != null) return
+            val callback = object : AdvertiseCallback() {
+                override fun onStartSuccess(settingsInEffect: AdvertiseSettings) {
+                    if (synchronized(advertiseLock) { activeAdvertiseCallback === this }) {
+                        Log.i("PhoneKeyTiming", "ble_advertising_ready")
+                        onStatusChanged("PhoneKey is advertising over BLE")
+                    } else {
+                        // A late success belongs to a canceled QR scan.
+                        try { advertiser.stopAdvertising(this) } catch (_: Exception) { }
+                    }
+                }
+
+                override fun onStartFailure(errorCode: Int) {
+                    val current = synchronized(advertiseLock) {
+                        if (activeAdvertiseCallback === this) {
+                            activeAdvertiseCallback = null
+                            true
+                        } else false
+                    }
+                    if (current) {
+                        Log.i("PhoneKeyTiming", "ble_advertising_failed_code=$errorCode")
+                        onStatusChanged("BLE advertising failed: $errorCode")
+                    }
+                }
+            }
+            activeAdvertiseCallback = callback
+            try {
+                advertiser.startAdvertising(settings, data, callback)
+            } catch (error: Exception) {
+                activeAdvertiseCallback = null
+                onStatusChanged("BLE advertising could not start: ${error.message}")
+                return
+            }
+            Log.i("PhoneKeyTiming", "ble_advertise_requested")
+        }
 
         onStatusChanged(
             "Starting PhoneKey BLE advertising..."
@@ -580,51 +637,21 @@ class PhoneKeyGattServer(
 
     @SuppressLint("MissingPermission")
     private fun stopAdvertising() {
-        // stopAdvertising is safe to call for the same callback even when the
-        // start callback has not fired yet. Do not gate this on our local
-        // `advertising` flag: some phones can have a start request in flight
-        // while that flag is still false, which previously made a refresh a
-        // no-op and left Windows unable to rediscover PhoneKey after QR scan.
-        if (hasRequiredPermissions()) {
-            bluetoothAdapter
-                .bluetoothLeAdvertiser
-                ?.stopAdvertising(
-                    advertiseCallback
-                )
+        val callback = synchronized(advertiseLock) {
+            advertiseGeneration++
+            val previous = activeAdvertiseCallback
+            activeAdvertiseCallback = null
+            previous
         }
-
-        advertising =
-            false
+        if (callback != null && hasRequiredPermissions()) {
+            try {
+                bluetoothAdapter.bluetoothLeAdvertiser?.stopAdvertising(callback)
+                Log.i("PhoneKeyTiming", "ble_advertiser_stop_requested")
+            } catch (error: Exception) {
+                onStatusChanged("BLE advertising stop failed: ${error.message}")
+            }
+        }
     }
-
-    private val advertiseCallback =
-        object : AdvertiseCallback() {
-
-            override fun onStartSuccess(
-                settingsInEffect:
-                    AdvertiseSettings
-            ) {
-                Log.i("PhoneKeyTiming", "ble_advertising_ready")
-                advertising =
-                    true
-
-                onStatusChanged(
-                    "PhoneKey is advertising over BLE"
-                )
-            }
-
-            override fun onStartFailure(
-                errorCode: Int
-            ) {
-                Log.i("PhoneKeyTiming", "ble_advertising_failed_code=$errorCode")
-                advertising =
-                    false
-
-                onStatusChanged(
-                    "BLE advertising failed: $errorCode"
-                )
-            }
-        }
 
     private fun hasRequiredPermissions():
         Boolean {

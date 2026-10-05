@@ -1191,7 +1191,7 @@ object PhoneKeyProtocol {
                 }
 
                 else ->
-                    error(
+                    throw IllegalArgumentException(
                         "Unsupported CBOR encoding"
                     )
             }
