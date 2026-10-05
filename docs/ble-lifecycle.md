@@ -88,3 +88,11 @@ previous eight-second refresh could run after Windows selected an advertisement
 but before Android reported the client connected, interrupting connection
 establishment. Android tests and the separate-package APK build passed after
 removing this timer. Further real repeated testing remains required.
+Latest device run after timer removal: two real Windows sign-ins succeeded. The
+third completed discovery, characteristic acquisition and challenge delivery,
+but no proof arrived before timeout. Whether that QR was scanned and approved
+has not yet been confirmed; this is not classified as a solved biometric issue
+or counted as a successful repeated test. All four CI checks on 8e9a7c7 passed.
+Testing stops on failure/timeout and leaves the Windows PIN available. The test
+app's temporary pairing remains active during investigation; the original app
+and protected trust/account backups are retained for restoration.
