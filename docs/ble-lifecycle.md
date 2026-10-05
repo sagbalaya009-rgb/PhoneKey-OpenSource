@@ -60,3 +60,20 @@ service is running; the credential provider and existing password were preserved
 The updated Android app is installed under a separate test package because the
 original package's signing key is unavailable. Real sign-in tests of the updated
 pair are still pending; no never-stall or cross-device reliability claim is made.
+
+Repeated live testing exposed a separate credential-provider defect. The first
+three sign-ins succeeded; on the fourth, Windows logged proof acceptance, then
+selected the tile again and created a new QR before credential redemption. The
+provider treated an approved transaction as an idle session and overwrote it.
+Reselection now returns the existing verified transaction for automatic
+submission, while GetSerialization still performs authoritative one-time
+redemption. Explicit deselection clears approval. New event IDs distinguish
+deselection and retention of an approved transaction.
+
+The regression fixture links the actual credential implementation: 100
+reselections must preserve its approved handle; deselection, invalid handles and
+unverified selection must not allow automatic submission. The original source
+fails this fixture; the corrected source passes, and the native DLL builds.
+This is evidence of a real lost-approval defect. The corrected pair still needs
+a fresh consecutive live run; the failed four-attempt run is not counted as a
+successful reliability test.

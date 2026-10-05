@@ -59,6 +59,19 @@ jobs:
           if (-not $test) { throw "PhoneKeyTransportTests.exe not found" }
           & $test.FullName
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Build credential selection regression tests
+        shell: pwsh
+        run: msbuild windows\credential-provider\tests\PhoneKeyCredentialSelectionTests.vcxproj /m /p:Configuration=Release /p:Platform=x64
+      - name: Run credential selection regression tests
+        shell: pwsh
+        run: |
+          $test = Get-ChildItem windows\credential-provider\tests -Recurse -Filter PhoneKeyCredentialSelectionTests.exe | Select-Object -First 1
+          if (-not $test) { throw "PhoneKeyCredentialSelectionTests.exe not found" }
+          & $test.FullName
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Build credential provider
+        shell: pwsh
+        run: msbuild windows\credential-provider\SampleV2CredentialProvider.vcxproj /m /p:Configuration=Release /p:Platform=x64 /p:PlatformToolset=v143 /p:WindowsTargetPlatformVersion=10.0
 
   android-unit:
     runs-on: ubuntu-latest

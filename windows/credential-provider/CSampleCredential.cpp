@@ -374,6 +374,17 @@ HRESULT CSampleCredential::SetSelected(
     *pbAutoLogon = FALSE;
     RecordPhoneKeySignInEvent(4090); // PhoneKey tile selected.
 
+    // LogonUI can select the same tile again while field updates from the
+    // verified QR dialog are being dispatched. Preserve the one-time approved
+    // transaction until GetSerialization redeems it; beginning another QR here
+    // would overwrite the accepted proof before it can be submitted.
+    if (_fPhoneKeyVerified && _phoneKeyTransactionId.size() == 16)
+    {
+        RecordPhoneKeySignInEvent(4092); // Reused verified transaction on reselection.
+        *pbAutoLogon = TRUE;
+        return S_OK;
+    }
+
     if (_fPhoneKeySessionActive)
     {
         if (_phoneKeyQrExpiresAtMs > PhoneKeyUnixTimeMs() &&
@@ -542,6 +553,7 @@ HRESULT CSampleCredential::SetSelected(
 // is to clear out the password field.
 HRESULT CSampleCredential::SetDeselected()
 {
+    RecordPhoneKeySignInEvent(4091); // Explicit tile deselection clears approval.
     CancelPhoneKeySessionBestEffort();
 
     HRESULT hr = S_OK;
