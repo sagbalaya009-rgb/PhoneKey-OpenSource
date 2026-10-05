@@ -29,6 +29,13 @@ jobs:
         run: cargo check --workspace --all-targets
       - name: Rust tests
         run: cargo test --workspace --all-targets
+      - name: Build diagnostic service
+        run: cargo build --release -p phonekey-service --bin phonekey-service
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phonekey-service-diagnostic
+          path: windows/target/release/phonekey-service.exe
+          retention-days: 7
       - name: Rust clippy (advisory)
         continue-on-error: true
         run: cargo clippy --workspace --all-targets -- -D warnings

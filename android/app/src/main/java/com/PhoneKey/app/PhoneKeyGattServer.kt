@@ -167,6 +167,7 @@ class PhoneKeyGattServer(
     fun stop() {
         stopAdvertising()
         bleClientConnected = false
+        preparedFileWrite.clear()
 
         gattServer?.close()
         gattServer = null
@@ -259,6 +260,10 @@ class PhoneKeyGattServer(
         object :
             BluetoothGattServerCallback() {
 
+            override fun onMtuChanged(device: android.bluetooth.BluetoothDevice, mtu: Int) {
+                Log.i("PhoneKeyTiming", "ble_mtu=$mtu")
+            }
+
             override fun onServiceAdded(
                 status: Int,
                 service: BluetoothGattService
@@ -294,6 +299,10 @@ class PhoneKeyGattServer(
                 status: Int,
                 newState: Int
             ) {
+                if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                    bleClientConnected = false
+                    preparedFileWrite.clear()
+                }
                 if (status != BluetoothGatt.GATT_SUCCESS) {
                     onStatusChanged(
                         "BLE client connection failed: $status"
@@ -339,6 +348,8 @@ class PhoneKeyGattServer(
                         preparedFileWrite.clear()
                         false
                     }
+                    if (offset == 0) Log.i("PhoneKeyTiming", "ble_prepared_write_started")
+                    if (!valid) Log.i("PhoneKeyTiming", "ble_prepared_write_rejected")
                     if (responseNeeded) {
                         gattServer?.sendResponse(
                             device, requestId,
@@ -399,9 +410,10 @@ class PhoneKeyGattServer(
                 execute: Boolean
             ) {
                 val payload = try {
-                    preparedFileWrite.finish(device.address, execute)
+                    preparedFileWrite.finishChallenge(device.address, execute)
                 } catch (error: IllegalArgumentException) {
                     preparedFileWrite.clear()
+                    Log.i("PhoneKeyTiming", "ble_prepared_execute_rejected")
                     gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_FAILURE, 0, null)
                     return
                 }
@@ -409,19 +421,10 @@ class PhoneKeyGattServer(
                     gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
                     return
                 }
-                val validFileRequest = try {
-                    PhoneKeyProtocol.decodeFileOpenChallenge(payload)
-                    true
-                } catch (error: Exception) {
-                    false
-                }
-                if (!validFileRequest) {
-                    gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_FAILURE, 0, null)
-                    return
-                }
                 clearProofPayload()
                 gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
-                onStatusChanged("Encrypted-file challenge received (${payload.size} bytes)")
+                Log.i("PhoneKeyTiming", "ble_prepared_challenge_received")
+                onStatusChanged("PhoneKey challenge received (${payload.size} bytes)")
                 onChallengeReceived(payload)
             }
 

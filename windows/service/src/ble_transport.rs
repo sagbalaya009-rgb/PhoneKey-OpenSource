@@ -26,6 +26,10 @@ use windows::Devices::Bluetooth::GenericAttributeProfile::{
 use windows::Foundation::TypedEventHandler;
 
 use windows::Security::Cryptography::CryptographicBuffer;
+use windows::Win32::Foundation::HANDLE;
+use windows::Win32::System::EventLog::{
+    DeregisterEventSource, EVENTLOG_INFORMATION_TYPE, RegisterEventSourceW, ReportEventW,
+};
 
 pub type BleTransportError = Box<dyn Error + Send + Sync>;
 
@@ -42,6 +46,29 @@ const PHONEKEY_CHALLENGE_UUID: GUID = GUID::from_u128(0x7d2ea28bf7bd485abd9d92ad
 const PHONEKEY_PROOF_UUID: GUID = GUID::from_u128(0x7d2ea28cf7bd485abd9d92ad6ecfe93e);
 
 const MAX_MESSAGE_BYTES: usize = 2048;
+
+// Event IDs only. No address, SID, QR, proof, key, password or other payload is
+// supplied to the event log. Logging failures cannot affect authentication.
+struct BleTrace(Option<HANDLE>);
+impl BleTrace {
+    fn new() -> Self {
+        Self(unsafe { RegisterEventSourceW(None, windows::core::w!("PhoneKey BLE")) }.ok())
+    }
+    fn record(&self, id: u32) {
+        if let Some(source) = self.0 {
+            let _ = unsafe {
+                ReportEventW(source, EVENTLOG_INFORMATION_TYPE, 0, id, None, 0, None, None)
+            };
+        }
+    }
+}
+impl Drop for BleTrace {
+    fn drop(&mut self) {
+        if let Some(source) = self.0 {
+            let _ = unsafe { DeregisterEventSource(source) };
+        }
+    }
+}
 
 fn unix_time_ms() -> Result<u64, BleTransportError> {
     let duration = SystemTime::now().duration_since(UNIX_EPOCH)?;
@@ -169,6 +196,8 @@ pub fn exchange_login(
         return Ok(None);
     }
 
+    let trace = BleTrace::new();
+
     // Bluetooth addresses occupy 48 bits; keep the advertised address type
     // in the same atomic value so the callback cannot publish one without
     // the other. Android commonly advertises with a random address.
@@ -221,6 +250,7 @@ pub fn exchange_login(
         token: watcher_token,
     };
     watcher.Start()?;
+    trace.record(4200); // Watcher started.
 
     while !cancelled()? {
         if found_device.load(Ordering::SeqCst) != 0 {
@@ -228,6 +258,7 @@ pub fn exchange_login(
         }
 
         if watcher.Status()? == BluetoothLEAdvertisementWatcherStatus::Aborted {
+            trace.record(4290);
             return Err(transport_error("PhoneKey BLE scan aborted by Windows"));
         }
 
@@ -247,6 +278,7 @@ pub fn exchange_login(
     }
 
     progress(LoginBleProgress::DeviceFound)?;
+    trace.record(4201); // Advertisement selected; opening device.
 
     let address_type = BluetoothAddressType((packed_device >> 48) as i32);
     let connection = if address_type == BluetoothAddressType::Public
@@ -260,6 +292,7 @@ pub fn exchange_login(
         value: await_ble!(connection),
         close: BluetoothLEDevice::Close,
     };
+    trace.record(4202); // Device opened; requesting uncached service discovery.
 
     let service_result = await_ble!(device.GetGattServicesForUuidWithCacheModeAsync(
         PHONEKEY_SERVICE_UUID,
@@ -267,6 +300,7 @@ pub fn exchange_login(
     ));
 
     if service_result.Status()? != GattCommunicationStatus::Success {
+        trace.record(4291);
         return Err(transport_error("PhoneKey GATT service discovery failed"));
     }
 
@@ -280,12 +314,14 @@ pub fn exchange_login(
         value: services.GetAt(0)?,
         close: windows::Devices::Bluetooth::GenericAttributeProfile::GattDeviceService::Close,
     };
+    trace.record(4203); // Service acquired; requesting characteristics.
 
     // One uncached discovery fetches both required characteristics, avoiding
     // a second serialized BLE query without trusting stale Windows cache data.
     let characteristics_result =
         await_ble!(service.GetCharacteristicsWithCacheModeAsync(BluetoothCacheMode::Uncached));
     if characteristics_result.Status()? != GattCommunicationStatus::Success {
+        trace.record(4292);
         return Err(transport_error("PhoneKey GATT characteristics unavailable"));
     }
     let mut challenge_characteristic = None;
@@ -306,6 +342,7 @@ pub fn exchange_login(
     };
 
     let challenge_buffer = CryptographicBuffer::CreateFromByteArray(challenge_bytes)?;
+    trace.record(4204); // Required characteristics acquired; writing challenge.
 
     let write_result =
         await_ble!(challenge_characteristic.WriteValueWithResultAndOptionAsync(
@@ -314,10 +351,12 @@ pub fn exchange_login(
         ));
 
     if write_result.Status()? != GattCommunicationStatus::Success {
+        trace.record(4293);
         return Err(transport_error("PhoneKey challenge write failed"));
     }
 
     progress(LoginBleProgress::ChallengeDelivered)?;
+    trace.record(4205); // Challenge acknowledged; reading proof.
 
     let mut received_proof: Option<Vec<u8>> = None;
 
@@ -341,6 +380,7 @@ pub fn exchange_login(
                 }
 
                 received_proof = Some(bytes);
+                trace.record(4206); // Proof received; authority verification follows.
 
                 break;
             }

@@ -16,7 +16,28 @@ silently until the challenge expires.
 This is transport hardening only. It does not change the QR nonce, challenge,
 phone proof, biometric requirement, or service-side signature verification.
 
-Validation completed: Android unit tests and debug build; Windows service's
+An additional defect affected GATT prepared writes: the execute handler accepted
+only file-opening requests, rejecting login and enrollment challenges assembled
+from fragments. It now fully decodes each of the three supported challenge
+types before dispatching to the existing QR/session/biometric handler. Proofs,
+truncated messages and unsupported types are rejected. Regression tests cover
+login and enrollment with 18-, 180- and 242-byte fragments, malformed requests,
+and attempts to execute the same buffer twice. Whether this path caused a
+particular historical incident still requires an aligned device trace.
+
+Error disconnects now clear the connected flag and pending writes, allowing a
+later scan to refresh an idle advertiser. Stopping the server also clears queued
+writes. Android traces record negotiated MTU and prepared-write stages without
+device addresses or message contents.
+
+The Windows transport previously capped an exchange at 45 seconds while the
+login QR allowed 60 seconds. Its cap now uses the protocol's 60-second constant;
+the original absolute expiry remains authoritative. Windows Application events
+from `PhoneKey BLE` identify discovery, device/service/characteristic acquisition,
+challenge acknowledgement and proof receipt using event IDs only. The read-only
+diagnostic script maps those IDs without printing event messages or payloads.
+
+Validation completed before these additional changes: Android unit tests and debug build; Windows service's
 189 unit tests; and 20 start/stop plus 20 repeated-start cycles on an isolated
 Android test package. The updated packages have **not** completed a real
 Windows sign-in on the paired production installation. Do not interpret these

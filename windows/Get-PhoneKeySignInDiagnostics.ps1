@@ -25,6 +25,17 @@ $stages = @{
     4192 = 'Windows rejected submitted credential'
     4193 = 'Windows rejected saved account password; refresh required'
     4194 = 'Phone challenge expired'
+    4200 = 'BLE watcher started'
+    4201 = 'BLE advertisement selected; opening device'
+    4202 = 'BLE device opened; querying service'
+    4203 = 'BLE service acquired; querying characteristics'
+    4204 = 'BLE characteristics acquired; writing challenge'
+    4205 = 'BLE challenge acknowledged; polling proof'
+    4206 = 'BLE proof received'
+    4290 = 'BLE watcher aborted'
+    4291 = 'BLE service query failed'
+    4292 = 'BLE characteristic query failed'
+    4293 = 'BLE challenge write failed'
 }
 $service = Get-Service -Name 'PhoneKeyService' -ErrorAction SilentlyContinue
 [pscustomobject]@{
@@ -48,7 +59,7 @@ foreach ($log in @('Microsoft-Windows-Winlogon/Operational', 'Application', 'Sys
             }
             # Provider, event ID and time are enough to locate a failure. Do
             # not print event Message: it may contain an account or path.
-            $stage = if ($event.ProviderName -eq 'PhoneKey Sign-In' -and
+            $stage = if ($event.ProviderName -in @('PhoneKey Sign-In', 'PhoneKey BLE') -and
                 $stages.ContainsKey([int]$event.Id)) {
                 " Stage=$($stages[[int]$event.Id])"
             } else { '' }
