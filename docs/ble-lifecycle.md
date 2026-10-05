@@ -96,3 +96,14 @@ or counted as a successful repeated test. All four CI checks on 8e9a7c7 passed.
 Testing stops on failure/timeout and leaves the Windows PIN available. The test
 app's temporary pairing remains active during investigation; the original app
 and protected trust/account backups are retained for restoration.
+
+Follow-up testing of the original paired Android app with the updated Windows
+service/provider completed six consecutive actual sign-ins: one captured run
+and five additional user-approved repeated runs, all with verified proof and
+Windows credential acceptance. Five phone timing snapshots recorded biometric
+launch and success. Scan acceptance to biometric launch ranged from 152 to
+2035 ms (mean 634 ms); camera aiming and human approval are outside that metric.
+The service is Running/Automatic and Smart App Control remains On. The original
+pairing is active. The separately signed Android fixes have not replaced the
+original APK, whose signing key is unavailable. These successes establish the
+observed run, not a never-stall guarantee or sleep/reboot/cross-device coverage.
