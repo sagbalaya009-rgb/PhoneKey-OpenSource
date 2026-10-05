@@ -15,7 +15,13 @@ class PhoneKeyFilePreparedWriteTest {
         val enrollment = PhoneKeyProtocol.encodeEnrollmentChallenge(PhoneKeyProtocol.EnrollmentChallenge(
             ByteArray(16) { 1 }, ByteArray(16) { 2 }, ByteArray(32) { 3 }, 1000, 61000
         ))
-        for (payload in listOf(login, enrollment)) {
+        val file = PhoneKeyProtocol.encodeFileOpenChallenge(PhoneKeyProtocol.FileOpenChallenge(
+            ByteArray(16) { 1 }, ByteArray(16) { 2 }, ByteArray(16) { 3 },
+            ByteArray(32) { 4 }, ByteArray(32) { 5 }, 1000, 61000,
+            byteArrayOf(0x50, 0x4b, 0x57, 0x31) + ByteArray(125),
+            byteArrayOf(4) + ByteArray(64)
+        ))
+        for (payload in listOf(login, enrollment, file)) {
             // ATT Prepare Write reserves five bytes of the negotiated MTU.
             for (fragmentSize in listOf(18, 180, 242)) {
                 val assembler = PhoneKeyFilePreparedWrite()
@@ -36,7 +42,7 @@ class PhoneKeyFilePreparedWriteTest {
         val proof = PhoneKeyProtocol.encodeLoginProof(PhoneKeyProtocol.LoginProof(
             ByteArray(16), ByteArray(16), ByteArray(64)
         ))
-        for (payload in listOf(proof, byteArrayOf(0xa9.toByte(), 1, 1, 2, 1))) {
+        for (payload in listOf(proof, byteArrayOf(0xa9.toByte(), 1, 1, 2, 1), byteArrayOf(0xbf.toByte()))) {
             val assembler = PhoneKeyFilePreparedWrite()
             assembler.append("client", 0, payload)
             assertThrows(IllegalArgumentException::class.java) {

@@ -61,8 +61,9 @@ class PhoneKeyGattServer(
     private val bluetoothAdapter
         get() = bluetoothManager.adapter
 
-    private var gattServer:
+    @Volatile private var gattServer:
         BluetoothGattServer? = null
+    private val gattGeneration = AtomicLong(0)
 
     // The callback is assigned before startAdvertising returns. A QR rescan
     // can therefore stop even a request whose success callback is still queued.
@@ -165,6 +166,7 @@ class PhoneKeyGattServer(
 
     @SuppressLint("MissingPermission")
     fun stop() {
+        gattGeneration.incrementAndGet()
         stopAdvertising()
         bleClientConnected = false
         preparedFileWrite.clear()
@@ -181,10 +183,11 @@ class PhoneKeyGattServer(
 
     @SuppressLint("MissingPermission")
     private fun createGattServer() {
+        val generation = gattGeneration.incrementAndGet()
         val server =
             bluetoothManager.openGattServer(
                 context,
-                gattServerCallback
+                newGattServerCallback(generation)
             )
 
         if (server == null) {
@@ -256,11 +259,12 @@ class PhoneKeyGattServer(
         )
     }
 
-    private val gattServerCallback =
+    private fun newGattServerCallback(generation: Long) =
         object :
             BluetoothGattServerCallback() {
 
             override fun onMtuChanged(device: android.bluetooth.BluetoothDevice, mtu: Int) {
+                if (gattGeneration.get() != generation) return
                 Log.i("PhoneKeyTiming", "ble_mtu=$mtu")
             }
 
@@ -268,6 +272,7 @@ class PhoneKeyGattServer(
                 status: Int,
                 service: BluetoothGattService
             ) {
+                if (gattGeneration.get() != generation) return
                 if (
                     service.uuid !=
                     SERVICE_UUID
@@ -285,8 +290,7 @@ class PhoneKeyGattServer(
 
                     startAdvertising()
                 } else {
-                    gattServer?.close()
-                    gattServer = null
+                    stop()
                     onStatusChanged(
                         "Failed to create GATT service: $status"
                     )
@@ -299,6 +303,7 @@ class PhoneKeyGattServer(
                 status: Int,
                 newState: Int
             ) {
+                if (gattGeneration.get() != generation) return
                 if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                     bleClientConnected = false
                     preparedFileWrite.clear()
@@ -340,6 +345,7 @@ class PhoneKeyGattServer(
                 offset: Int,
                 value: ByteArray
             ) {
+                if (gattGeneration.get() != generation) return
                 if (characteristic.uuid == CHALLENGE_UUID && preparedWrite) {
                     val valid = try {
                         preparedFileWrite.append(device.address, offset, value)
@@ -409,6 +415,7 @@ class PhoneKeyGattServer(
                 requestId: Int,
                 execute: Boolean
             ) {
+                if (gattGeneration.get() != generation) return
                 val payload = try {
                     preparedFileWrite.finishChallenge(device.address, execute)
                 } catch (error: IllegalArgumentException) {
@@ -437,6 +444,7 @@ class PhoneKeyGattServer(
                 characteristic:
                     BluetoothGattCharacteristic
             ) {
+                if (gattGeneration.get() != generation) return
                 if (
                     characteristic.uuid !=
                     PROOF_UUID
@@ -522,6 +530,7 @@ class PhoneKeyGattServer(
                 offset: Int,
                 value: ByteArray
             ) {
+                if (gattGeneration.get() != generation) return
                 if (
                     descriptor.uuid ==
                     CLIENT_CONFIGURATION_UUID
